@@ -171,52 +171,25 @@ void RadarVideoItem::regenerateRadarImage() {
     // Check if size changed
     bool sizeChanged = radarImage.size() != QSize(w, h);
 
-    // Check if zoom/offset changed
-    bool zoomChanged = !qFuzzyCompare(m_zoomLevel, lastZoomLevel);
-    bool offsetChanged = m_centerOffset != lastCenterOffset;
-
-    // Check if any individual video layer visibility has changed
-    bool visibilityChanged = false;
-    for (int i = 0; i < 4; ++i) {
-        if (videoVisible[i] != lastVideoVisible[i]) {
-            visibilityChanged = true;
-            lastVideoVisible[i] = videoVisible[i];
-        }
-    }
-
-    // Only recreate image if size changed
+    // Only recreate image if size changed - this clears the image
     if (sizeChanged) {
         radarImage = QImage(w, h, QImage::Format_ARGB32);
         radarImage.fill(Qt::transparent);
         needsImageRegeneration = true;
     }
 
-    // Check if any video layer is currently visible
-    bool anyVideoVisible = isAllVideoVisible && (videoVisible[0] || videoVisible[1] || videoVisible[2] || videoVisible[3]);
-
-    // If zoom, offset, or visibility changed, redraw existing angles incrementally
-    if ((zoomChanged || offsetChanged || visibilityChanged) && !radarImage.isNull() && anyVideoVisible && !videoDataMap.isEmpty()) {
-        // Clear the image first
-        radarImage.fill(Qt::transparent);
-
-        double mpp = metersPerPixel(m_latitude, m_zoomLevel);
-        QPointF viewCenter(w / 2.0 + m_centerOffset.x(), h / 2.0 + m_centerOffset.y());
-
-        QRgb rgbColors[4];
-        for (int i = 0; i < 4; ++i) {
-            QColor c = intensityVideoColorMap[QString::number(i)];
-            rgbColors[i] = qRgb(c.red(), c.green(), c.blue());
-        }
-
-        // Redraw each angle incrementally
-        for (auto it = videoDataMap.constBegin(); it != videoDataMap.constEnd(); ++it) {
-            const VideoData &vdata = it.value();
-            drawAngleToImage(vdata, rgbColors, viewCenter, mpp, w, h);
-        }
-    }
-
+    // Don't redraw on zoom/offset/visibility changes
+    // Let the incremental angle-by-angle updates handle everything naturally
+    // This maintains the radar sweep behavior
+    
     lastZoomLevel = m_zoomLevel;
     lastCenterOffset = m_centerOffset;
+    
+    // Update visibility tracking without triggering redraw
+    for (int i = 0; i < 4; ++i) {
+        lastVideoVisible[i] = videoVisible[i];
+    }
+    
     needsImageRegeneration = false;
 }
 
@@ -399,12 +372,9 @@ void RadarVideoItem::updateVideoIntensity(float intensity, const QString &number
 void RadarVideoItem::setVideoVisibility(int index, bool visible) {
     if (index >= 0 && index < 4) {
         QMutexLocker locker(&mutex);
-        if (videoVisible[index] != visible) {
-            videoVisible[index] = visible;
-            
-            // Mark that we need to regenerate the image on next zoom/offset change
-            needsImageRegeneration = true;
-        }
+        videoVisible[index] = visible;
+        
+        // Don't trigger full redraw - let incremental angle updates handle visibility
         update();
     }
     else if (index == 6){
